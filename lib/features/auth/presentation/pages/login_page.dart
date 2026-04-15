@@ -8,7 +8,7 @@ import '../../../../core/providers/auth_providers.dart';
 import '../../../../models/user_role.dart';
 
 class LoginPage extends ConsumerStatefulWidget {
-  const LoginPage({Key? key}) : super(key: key);
+  const LoginPage({super.key});
 
   @override
   ConsumerState<LoginPage> createState() => _LoginPageState();
@@ -55,11 +55,11 @@ class _LoginPageState extends ConsumerState<LoginPage> {
         if (success) {
           final role = ref.read(currentUserProvider)?.role;
           if (role == UserRole.patient) {
-            context.go('/patient');
+            context.push('/patient');
           } else if (role == UserRole.dentist) {
-            context.go('/doctor');
+            context.push('/doctor');
           } else {
-            context.go('/receptionist');
+            context.push('/receptionist');
           }
         } else {
           ScaffoldMessenger.of(context).showSnackBar(

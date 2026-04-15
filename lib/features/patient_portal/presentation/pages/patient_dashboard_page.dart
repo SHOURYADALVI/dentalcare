@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/providers/auth_providers.dart';
@@ -8,7 +9,7 @@ import '../widgets/payment_summary_card.dart';
 import '../widgets/ui_components.dart';
 
 class PatientDashboardPage extends ConsumerWidget {
-  const PatientDashboardPage({Key? key}) : super(key: key);
+  const PatientDashboardPage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -17,7 +18,12 @@ class PatientDashboardPage extends ConsumerWidget {
     final summary = ref.watch(paymentSummaryProvider);
     final firstName = (user?.name.split(' ').first ?? 'Patient').trim();
 
-    return Scaffold(
+    return WillPopScope(
+      onWillPop: () async {
+        await SystemNavigator.pop();
+        return false;
+      },
+      child: Scaffold(
       appBar: AppBar(title: const Text('Patient Dashboard')),
       body: FadeInView(
         child: SingleChildScrollView(
@@ -33,22 +39,35 @@ class PatientDashboardPage extends ConsumerWidget {
               CustomCard(
                 color: AppTheme.primaryLight,
                 padding: const EdgeInsets.all(AppTheme.paddingLarge),
-                child: Row(
+                child: Column(
                   children: [
-                    Container(
-                      width: 50,
-                      height: 50,
-                      decoration: BoxDecoration(
-                        color: AppTheme.primaryColor,
-                        borderRadius: BorderRadius.circular(AppTheme.radiusLarge),
-                      ),
-                      child: const Icon(Icons.local_hospital, color: Colors.white),
+                    Row(
+                      children: [
+                        Container(
+                          width: 50,
+                          height: 50,
+                          decoration: BoxDecoration(
+                            color: AppTheme.primaryColor,
+                            borderRadius: BorderRadius.circular(AppTheme.radiusLarge),
+                          ),
+                          child: const Icon(Icons.local_hospital, color: Colors.white),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'Your care is on track. Keep up with appointments and treatment plans.',
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        'Your care is on track. Keep up with appointments and treatment plans.',
-                        style: Theme.of(context).textTheme.bodyMedium,
+                    const SizedBox(height: AppTheme.paddingMedium),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: ElevatedButton.icon(
+                        onPressed: () => context.push('/patient/appointments'),
+                        icon: const Icon(Icons.add_circle_outline),
+                        label: const Text('Request Appointment'),
                       ),
                     ),
                   ],
@@ -60,7 +79,7 @@ class PatientDashboardPage extends ConsumerWidget {
               CustomCard(
                 padding: const EdgeInsets.all(AppTheme.paddingLarge),
                 child: upcomingAppointment == null
-                    ? InfoRow(
+                    ? const InfoRow(
                         icon: Icons.event_busy,
                         label: 'Status',
                         value: 'No upcoming appointment',
@@ -114,7 +133,7 @@ class PatientDashboardPage extends ConsumerWidget {
                             : constraints.maxWidth,
                         title: 'View Report',
                         icon: Icons.description_outlined,
-                        onTap: () => context.go('/patient/report'),
+                        onTap: () => context.push('/patient/report'),
                       ),
                       _ActionTile(
                         width: isWide
@@ -122,7 +141,7 @@ class PatientDashboardPage extends ConsumerWidget {
                             : constraints.maxWidth,
                         title: 'Doctor Info',
                         icon: Icons.medical_information_outlined,
-                        onTap: () => context.go('/patient/doctor-info'),
+                        onTap: () => context.push('/patient/doctor-info'),
                       ),
                       _ActionTile(
                         width: isWide
@@ -130,7 +149,7 @@ class PatientDashboardPage extends ConsumerWidget {
                             : constraints.maxWidth,
                         title: 'Appointments',
                         icon: Icons.event_note_outlined,
-                        onTap: () => context.go('/patient/appointments'),
+                        onTap: () => context.push('/patient/appointments'),
                       ),
                       _ActionTile(
                         width: isWide
@@ -138,7 +157,7 @@ class PatientDashboardPage extends ConsumerWidget {
                             : constraints.maxWidth,
                         title: 'Payments',
                         icon: Icons.payments_outlined,
-                        onTap: () => context.go('/patient/payments'),
+                        onTap: () => context.push('/patient/payments'),
                       ),
                     ],
                   );
@@ -147,6 +166,7 @@ class PatientDashboardPage extends ConsumerWidget {
             ],
           ),
         ),
+      ),
       ),
     );
   }

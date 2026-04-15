@@ -26,8 +26,21 @@ final patientAppointmentsProvider = Provider<List<PatientAppointmentItem>>((ref)
     return [];
   }
 
-  String _fmt(DateTime dt) =>
+  String fmt(DateTime dt) =>
       '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+
+  String mapStatus(AppointmentStatus status) {
+    switch (status) {
+      case AppointmentStatus.requested:
+        return 'Pending';
+      case AppointmentStatus.scheduled:
+        return 'Confirmed';
+      case AppointmentStatus.completed:
+        return 'Completed';
+      case AppointmentStatus.cancelled:
+        return 'Rejected';
+    }
+  }
 
   return appointments
       .where((a) => a.patientId == patient.id)
@@ -35,10 +48,14 @@ final patientAppointmentsProvider = Provider<List<PatientAppointmentItem>>((ref)
         (a) => PatientAppointmentItem(
           id: a.id,
           date: a.appointmentDate,
-          time: _fmt(a.startTime),
+          time: a.status == AppointmentStatus.requested && a.preferredStartTime == null
+              ? 'Awaiting slot assignment'
+              : fmt(a.startTime),
           doctorName: a.dentistName ?? 'Doctor',
           consultationFee: 500,
-          status: a.status.displayName,
+          status: mapStatus(a.status),
+          reasonForVisit: a.reasonForVisit,
+          rejectionReason: a.rejectionReason,
         ),
       )
       .toList();

@@ -17,6 +17,8 @@ class PatientAppointmentItem {
   final String doctorName;
   final double consultationFee;
   final String status;
+  final String? reasonForVisit;
+  final String? rejectionReason;
 
   const PatientAppointmentItem({
     required this.id,
@@ -25,6 +27,8 @@ class PatientAppointmentItem {
     required this.doctorName,
     required this.consultationFee,
     required this.status,
+    this.reasonForVisit,
+    this.rejectionReason,
   });
 }
 

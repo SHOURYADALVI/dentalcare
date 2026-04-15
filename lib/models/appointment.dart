@@ -2,8 +2,8 @@ import 'package:uuid/uuid.dart';
 
 /// Enum for appointment status
 enum AppointmentStatus {
-  requested('Pending Approval'),
-  scheduled('Booked'),
+  requested('Pending'),
+  scheduled('Confirmed'),
   completed('Completed'),
   cancelled('Rejected');
 
@@ -22,6 +22,10 @@ class Appointment {
   final DateTime endTime;
   final String? dentistName;
   final String? notes;
+  final String? reasonForVisit;
+  final DateTime? preferredStartTime;
+  final DateTime? preferredEndTime;
+  final String? rejectionReason;
   final AppointmentStatus status;
   final DateTime createdAt;
 
@@ -34,6 +38,10 @@ class Appointment {
     required this.endTime,
     this.dentistName,
     this.notes,
+    this.reasonForVisit,
+    this.preferredStartTime,
+    this.preferredEndTime,
+    this.rejectionReason,
     this.status = AppointmentStatus.scheduled,
     DateTime? createdAt,
   })  : id = id ?? const Uuid().v4(),
@@ -62,6 +70,10 @@ class Appointment {
     DateTime? endTime,
     String? dentistName,
     String? notes,
+    String? reasonForVisit,
+    DateTime? preferredStartTime,
+    DateTime? preferredEndTime,
+    String? rejectionReason,
     AppointmentStatus? status,
     DateTime? createdAt,
   }) {
@@ -74,6 +86,10 @@ class Appointment {
       endTime: endTime ?? this.endTime,
       dentistName: dentistName ?? this.dentistName,
       notes: notes ?? this.notes,
+      reasonForVisit: reasonForVisit ?? this.reasonForVisit,
+      preferredStartTime: preferredStartTime ?? this.preferredStartTime,
+      preferredEndTime: preferredEndTime ?? this.preferredEndTime,
+      rejectionReason: rejectionReason ?? this.rejectionReason,
       status: status ?? this.status,
       createdAt: createdAt ?? this.createdAt,
     );
@@ -94,6 +110,14 @@ class Appointment {
       endTime: DateTime.parse(json['endTime'] as String),
       dentistName: json['dentistName'] as String?,
       notes: json['notes'] as String?,
+        reasonForVisit: json['reasonForVisit'] as String?,
+        preferredStartTime: json['preferredStartTime'] != null
+          ? DateTime.parse(json['preferredStartTime'] as String)
+          : null,
+        preferredEndTime: json['preferredEndTime'] != null
+          ? DateTime.parse(json['preferredEndTime'] as String)
+          : null,
+        rejectionReason: json['rejectionReason'] as String?,
       status: AppointmentStatus.values.firstWhere(
         (s) => s.name == json['status'],
         orElse: () => AppointmentStatus.scheduled,
@@ -114,6 +138,10 @@ class Appointment {
       'endTime': endTime.toIso8601String(),
       'dentistName': dentistName,
       'notes': notes,
+      'reasonForVisit': reasonForVisit,
+      'preferredStartTime': preferredStartTime?.toIso8601String(),
+      'preferredEndTime': preferredEndTime?.toIso8601String(),
+      'rejectionReason': rejectionReason,
       'status': status.name,
       'createdAt': createdAt.toIso8601String(),
     };

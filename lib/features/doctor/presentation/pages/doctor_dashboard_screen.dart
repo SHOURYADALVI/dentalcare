@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/providers/clinic_crud_providers.dart';
 import '../../../../core/theme.dart';
@@ -17,9 +18,9 @@ class DoctorDashboardScreen extends ConsumerStatefulWidget {
   final String portalTitle;
 
   const DoctorDashboardScreen({
-    Key? key,
+    super.key,
     this.portalTitle = 'DENTLINK Doctor Dashboard',
-  }) : super(key: key);
+  });
 
   @override
   ConsumerState<DoctorDashboardScreen> createState() => _DoctorDashboardScreenState();
@@ -38,19 +39,30 @@ class _DoctorDashboardScreenState extends ConsumerState<DoctorDashboardScreen> {
       const _DoctorProfileTab(),
     ];
 
-    return Scaffold(
-      appBar: AppBar(title: Text(widget.portalTitle)),
-      body: IndexedStack(index: _index, children: pages),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (value) => setState(() => _index = value),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.dashboard_outlined), label: 'Dashboard'),
-          NavigationDestination(icon: Icon(Icons.event_note_outlined), label: 'Appointments'),
-          NavigationDestination(icon: Icon(Icons.people_alt_outlined), label: 'Patients'),
-          NavigationDestination(icon: Icon(Icons.description_outlined), label: 'Reports'),
-          NavigationDestination(icon: Icon(Icons.person_outline), label: 'Profile'),
-        ],
+    return WillPopScope(
+      onWillPop: () async {
+        if (_index != 0) {
+          setState(() => _index = 0);
+          return false;
+        }
+
+        await SystemNavigator.pop();
+        return false;
+      },
+      child: Scaffold(
+        appBar: AppBar(title: Text(widget.portalTitle)),
+        body: IndexedStack(index: _index, children: pages),
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: _index,
+          onDestinationSelected: (value) => setState(() => _index = value),
+          destinations: const [
+            NavigationDestination(icon: Icon(Icons.dashboard_outlined), label: 'Dashboard'),
+            NavigationDestination(icon: Icon(Icons.event_note_outlined), label: 'Appointments'),
+            NavigationDestination(icon: Icon(Icons.people_alt_outlined), label: 'Patients'),
+            NavigationDestination(icon: Icon(Icons.description_outlined), label: 'Reports'),
+            NavigationDestination(icon: Icon(Icons.person_outline), label: 'Profile'),
+          ],
+        ),
       ),
     );
   }
@@ -134,6 +146,8 @@ class _DoctorAppointmentsTab extends ConsumerStatefulWidget {
 }
 
 class _DoctorAppointmentsTabState extends ConsumerState<_DoctorAppointmentsTab> {
+  DateTime _selectedDate = DateTime.now();
+
   @override
   void initState() {
     super.initState();
@@ -144,18 +158,11 @@ class _DoctorAppointmentsTabState extends ConsumerState<_DoctorAppointmentsTab> 
 
   @override
   Widget build(BuildContext context) {
+    final notifier = ref.read(appointmentProvider.notifier);
     final appointments = ref.watch(appointmentProvider);
-    final now = DateTime.now();
-    final visibleAppointments = appointments.where((a) {
-      final appointmentDay = DateTime(
-        a.appointmentDate.year,
-        a.appointmentDate.month,
-        a.appointmentDate.day,
-      );
-      final today = DateTime(now.year, now.month, now.day);
-      return appointmentDay.isAtSameMomentAs(today) || appointmentDay.isAfter(today);
-    }).toList()
-      ..sort((a, b) => a.startTime.compareTo(b.startTime));
+    final pendingRequests = ref.watch(appointmentRequestsProvider);
+    final availability = ref.watch(clinicAvailabilityProvider);
+    final slots = notifier.buildHourlySlotsForDate(_selectedDate);
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(AppTheme.paddingMedium),
@@ -167,37 +174,448 @@ class _DoctorAppointmentsTabState extends ConsumerState<_DoctorAppointmentsTab> 
               const Expanded(
                 child: SectionTitle(
                   title: 'Appointments',
-                  subtitle: 'Update status and open patient details',
+                  subtitle: 'Schedule grid, requests, and approvals',
                 ),
               ),
               SizedBox(
-                width: 130,
+                width: 190,
                 child: ElevatedButton.icon(
-                  onPressed: () => _showAddAppointmentDialog(context, ref),
-                  icon: const Icon(Icons.add),
-                  label: const Text('Add'),
+                  onPressed: () => _showWorkingHoursDialog(context, ref, availability),
+                  icon: const Icon(Icons.schedule),
+                  label: const Text('Working Hours'),
                 ),
               ),
             ],
           ),
           const SizedBox(height: AppTheme.paddingMedium),
-          if (visibleAppointments.isEmpty)
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(AppTheme.paddingMedium),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Schedule for ${_selectedDate.day}/${_selectedDate.month}/${_selectedDate.year}',
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: () async {
+                          final picked = await showDatePicker(
+                            context: context,
+                            initialDate: _selectedDate,
+                            firstDate: DateTime.now().subtract(const Duration(days: 2)),
+                            lastDate: DateTime.now().add(const Duration(days: 365)),
+                          );
+                          if (picked != null) {
+                            setState(() => _selectedDate = picked);
+                          }
+                        },
+                        icon: const Icon(Icons.calendar_today_outlined),
+                        label: const Text('Change Day'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Green = Available  •  Yellow = Pending request  •  Red = Booked',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: AppTheme.paddingMedium),
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final isWide = constraints.maxWidth > 900;
+                      final columns = isWide ? 4 : 2;
+                      final tileWidth = (constraints.maxWidth - ((columns - 1) * 10)) / columns;
+
+                      return Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: slots.map((slot) {
+                          final booked = _bookedAppointmentForSlot(appointments, slot);
+                          final isBooked = booked != null;
+                          final isPending = notifier.isSlotPending(slot);
+                          final tileColor = isBooked
+                              ? AppTheme.errorColor
+                              : (isPending ? AppTheme.warningColor : AppTheme.successColor);
+                          final label = isBooked
+                              ? 'Booked: ${booked.patientName}'
+                              : (isPending ? 'Pending request' : 'Available');
+
+                          return AnimatedContainer(
+                            duration: const Duration(milliseconds: 220),
+                            width: tileWidth,
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: tileColor.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+                              border: Border.all(color: tileColor.withValues(alpha: 0.4)),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _formatTime(slot),
+                                  style: Theme.of(context).textTheme.titleLarge,
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  label,
+                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                        color: tileColor,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }).toList(),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: AppTheme.paddingLarge),
+          const SectionTitle(
+            title: 'Appointment Requests',
+            subtitle: 'Approve or reject pending requests',
+          ),
+          const SizedBox(height: AppTheme.paddingMedium),
+          if (pendingRequests.isEmpty)
             const Card(
               child: Padding(
                 padding: EdgeInsets.all(AppTheme.paddingLarge),
-                child: Text('No upcoming appointments.'),
+                child: Text('No pending requests.'),
               ),
             )
           else
             Column(
-              children: visibleAppointments
-                  .map((a) => _AppointmentTile(appointment: a, allowActions: true))
-                  .toList(),
+              children: pendingRequests.map((request) {
+                return Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(AppTheme.paddingMedium),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                request.patientName,
+                                style: Theme.of(context).textTheme.titleLarge,
+                              ),
+                            ),
+                            StatusBadge(status: 'Pending'),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text('Preferred date: ${request.appointmentDate.day}/${request.appointmentDate.month}/${request.appointmentDate.year}'),
+                        if (request.preferredStartTime != null && request.preferredEndTime != null)
+                          Text(
+                            'Preferred time: ${_formatTime(request.preferredStartTime!)} - ${_formatTime(request.preferredEndTime!)}',
+                          ),
+                        if (request.reasonForVisit != null && request.reasonForVisit!.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Text('Reason: ${request.reasonForVisit!}'),
+                          ),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: ElevatedButton.icon(
+                                onPressed: () => _showApproveRequestDialog(context, ref, request),
+                                icon: const Icon(Icons.check_circle_outline),
+                                label: const Text('Approve'),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: () => _showRejectRequestDialog(context, ref, request),
+                                icon: const Icon(Icons.cancel_outlined),
+                                label: const Text('Reject'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }).toList(),
             ),
         ],
       ),
     );
   }
+
+  Appointment? _bookedAppointmentForSlot(List<Appointment> appointments, DateTime slot) {
+    for (final apt in appointments) {
+      if (apt.status != AppointmentStatus.scheduled && apt.status != AppointmentStatus.completed) {
+        continue;
+      }
+
+      final sameDay = apt.appointmentDate.year == slot.year &&
+          apt.appointmentDate.month == slot.month &&
+          apt.appointmentDate.day == slot.day;
+      if (!sameDay) continue;
+
+      if (apt.startTime.hour == slot.hour) {
+        return apt;
+      }
+    }
+    return null;
+  }
+
+  String _formatTime(DateTime dt) {
+    final hour = dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour);
+    final suffix = dt.hour >= 12 ? 'PM' : 'AM';
+    return '${hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')} $suffix';
+  }
+}
+
+Future<void> _showWorkingHoursDialog(
+  BuildContext context,
+  WidgetRef ref,
+  ClinicAvailability availability,
+) async {
+  var startHour = availability.startHour;
+  var endHour = availability.endHour;
+
+  await showDialog(
+    context: context,
+    builder: (context) => StatefulBuilder(
+      builder: (context, setState) {
+        return AlertDialog(
+          title: const Text('Set Working Hours'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DropdownButtonFormField<int>(
+                value: startHour,
+                decoration: const InputDecoration(labelText: 'Start Hour'),
+                items: List.generate(
+                  24,
+                  (i) => DropdownMenuItem(value: i, child: Text('${i.toString().padLeft(2, '0')}:00')),
+                ),
+                onChanged: (value) {
+                  if (value != null) setState(() => startHour = value);
+                },
+              ),
+              const SizedBox(height: 10),
+              DropdownButtonFormField<int>(
+                value: endHour,
+                decoration: const InputDecoration(labelText: 'End Hour'),
+                items: List.generate(
+                  24,
+                  (i) => DropdownMenuItem(value: i, child: Text('${i.toString().padLeft(2, '0')}:00')),
+                ),
+                onChanged: (value) {
+                  if (value != null) setState(() => endHour = value);
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                if (endHour <= startHour) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('End hour must be after start hour.')),
+                  );
+                  return;
+                }
+
+                await ref.read(appointmentProvider.notifier).updateWorkingHours(
+                      startHour: startHour,
+                      endHour: endHour,
+                    );
+
+                if (context.mounted) {
+                  Navigator.of(context).pop();
+                }
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    ),
+  );
+}
+
+Future<void> _showApproveRequestDialog(
+  BuildContext context,
+  WidgetRef ref,
+  Appointment request,
+) async {
+  DateTime selectedDate = request.appointmentDate;
+  DateTime? selectedSlot;
+
+  List<DateTime> slotsFor(DateTime date) {
+    final notifier = ref.read(appointmentProvider.notifier);
+    final available = notifier.getAvailableSlotsForDate(date);
+    if (request.preferredStartTime == null || request.preferredEndTime == null) {
+      return available;
+    }
+
+    final prefStart = request.preferredStartTime!;
+    final prefEnd = request.preferredEndTime!;
+    final preferredOnly = available.where((slot) {
+      final slotEnd = slot.add(const Duration(hours: 1));
+      return !(slotEnd.isBefore(prefStart) || slot.isAfter(prefEnd));
+    }).toList();
+
+    return preferredOnly.isNotEmpty ? preferredOnly : available;
+  }
+
+  await showDialog(
+    context: context,
+    builder: (context) => StatefulBuilder(
+      builder: (context, setState) {
+        final candidateSlots = slotsFor(selectedDate);
+        selectedSlot ??= candidateSlots.isNotEmpty ? candidateSlots.first : null;
+
+        return AlertDialog(
+          title: const Text('Approve Request'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text('Date: ${selectedDate.day}/${selectedDate.month}/${selectedDate.year}'),
+                trailing: const Icon(Icons.calendar_today_outlined),
+                onTap: () async {
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate: selectedDate,
+                    firstDate: DateTime.now(),
+                    lastDate: DateTime.now().add(const Duration(days: 365)),
+                  );
+                  if (picked != null) {
+                    setState(() {
+                      selectedDate = picked;
+                      selectedSlot = null;
+                    });
+                  }
+                },
+              ),
+              const SizedBox(height: 8),
+              DropdownButtonFormField<DateTime>(
+                value: selectedSlot,
+                decoration: const InputDecoration(labelText: 'Available Slot (1 hour)'),
+                items: candidateSlots
+                    .map(
+                      (slot) => DropdownMenuItem<DateTime>(
+                        value: slot,
+                        child: Text(
+                          '${slot.hour.toString().padLeft(2, '0')}:00 - ${(slot.hour + 1).toString().padLeft(2, '0')}:00',
+                        ),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (value) => setState(() => selectedSlot = value),
+              ),
+              if (candidateSlots.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: Text('No available slots for selected day.'),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: selectedSlot == null
+                  ? null
+                  : () async {
+                      try {
+                        await ref.read(appointmentProvider.notifier).approveRequest(
+                              requestId: request.id,
+                              slotStart: selectedSlot!,
+                              dentistName: 'Dr. Priya Sharma',
+                            );
+                        if (context.mounted) {
+                          Navigator.of(context).pop();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Request approved and confirmed.')),
+                          );
+                        }
+                      } catch (e) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Could not approve request: $e')),
+                          );
+                        }
+                      }
+                    },
+              child: const Text('Approve'),
+            ),
+          ],
+        );
+      },
+    ),
+  );
+}
+
+Future<void> _showRejectRequestDialog(
+  BuildContext context,
+  WidgetRef ref,
+  Appointment request,
+) async {
+  final reasonController = TextEditingController();
+
+  await showDialog(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Reject Request'),
+      content: TextField(
+        controller: reasonController,
+        minLines: 2,
+        maxLines: 3,
+        decoration: const InputDecoration(
+          labelText: 'Rejection reason (optional)',
+          hintText: 'Mention why this request cannot be scheduled',
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: () async {
+            await ref.read(appointmentProvider.notifier).rejectRequest(
+                  requestId: request.id,
+                  reason: reasonController.text.trim().isEmpty
+                      ? null
+                      : reasonController.text.trim(),
+                );
+            if (context.mounted) {
+              Navigator.of(context).pop();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Request rejected.')),
+              );
+            }
+          },
+          child: const Text('Reject'),
+        ),
+      ],
+    ),
+  );
 }
 
 class _DoctorPatientsTab extends ConsumerStatefulWidget {
@@ -479,11 +897,9 @@ class _DoctorProfileTab extends ConsumerWidget {
 
 class _AppointmentTile extends ConsumerWidget {
   final Appointment appointment;
-  final bool allowActions;
 
   const _AppointmentTile({
     required this.appointment,
-    this.allowActions = false,
   });
 
   @override
@@ -510,218 +926,11 @@ class _AppointmentTile extends ConsumerWidget {
               '${appointment.startTime.hour.toString().padLeft(2, '0')}:${appointment.startTime.minute.toString().padLeft(2, '0')} - ${appointment.endTime.hour.toString().padLeft(2, '0')}:${appointment.endTime.minute.toString().padLeft(2, '0')}',
               style: Theme.of(context).textTheme.bodySmall,
             ),
-            const SizedBox(height: 6),
-            if (allowActions)
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () {
-                        final patient = ref
-                            .read(patientListProvider)
-                            .firstWhere((p) => p.id == appointment.patientId);
-                        _showPatientDetailsDialog(context, ref, patient);
-                      },
-                      child: const Text('View Patient'),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  if (appointment.status == AppointmentStatus.requested) ...[
-                    Expanded(
-                      child: ElevatedButton(
-                        onPressed: () async {
-                          await ref.read(appointmentProvider.notifier).updateAppointment(
-                                appointment.copyWith(status: AppointmentStatus.scheduled),
-                              );
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Appointment accepted and booked.')),
-                            );
-                          }
-                        },
-                        child: const Text('Accept'),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextButton(
-                        onPressed: () async {
-                          await ref.read(appointmentProvider.notifier).updateAppointment(
-                                appointment.copyWith(status: AppointmentStatus.cancelled),
-                              );
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Appointment request rejected.')),
-                            );
-                          }
-                        },
-                        child: const Text('Reject'),
-                      ),
-                    ),
-                  ] else
-                    Expanded(
-                      child: DropdownButtonFormField<AppointmentStatus>(
-                        value: appointment.status,
-                        items: AppointmentStatus.values
-                            .where((s) => s != AppointmentStatus.requested)
-                            .map((s) => DropdownMenuItem(value: s, child: Text(s.displayName)))
-                            .toList(),
-                        onChanged: (value) async {
-                          if (value == null) return;
-                          try {
-                            await ref.read(appointmentProvider.notifier).updateAppointment(
-                                  appointment.copyWith(status: value),
-                                );
-                          } catch (_) {
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Unable to update appointment status.'),
-                                ),
-                              );
-                            }
-                          }
-                        },
-                        decoration: const InputDecoration(
-                          isDense: true,
-                          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
           ],
         ),
       ),
     );
   }
-}
-
-Future<void> _showAddAppointmentDialog(BuildContext context, WidgetRef ref) async {
-  String? selectedPatientId;
-  DateTime date = DateTime.now();
-  TimeOfDay start = const TimeOfDay(hour: 10, minute: 0);
-  TimeOfDay end = const TimeOfDay(hour: 10, minute: 45);
-
-  await showDialog(
-    context: context,
-    builder: (context) {
-      return StatefulBuilder(
-        builder: (context, setState) {
-          final patients = ref.read(patientListProvider);
-          return AlertDialog(
-            title: const Text('Add Appointment'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DropdownButtonFormField<String>(
-                  value: selectedPatientId,
-                  items: patients
-                      .map((p) => DropdownMenuItem(value: p.id, child: Text(p.name)))
-                      .toList(),
-                  onChanged: (value) => setState(() => selectedPatientId = value),
-                  decoration: const InputDecoration(labelText: 'Patient'),
-                ),
-                const SizedBox(height: 10),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text('Date: ${date.day}/${date.month}/${date.year}'),
-                  trailing: const Icon(Icons.calendar_today_outlined),
-                  onTap: () async {
-                    final picked = await showDatePicker(
-                      context: context,
-                      initialDate: date,
-                      firstDate: DateTime.now(),
-                      lastDate: DateTime.now().add(const Duration(days: 365)),
-                    );
-                    if (picked != null) setState(() => date = picked);
-                  },
-                ),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text('Start: ${start.format(context)}'),
-                  trailing: const Icon(Icons.access_time),
-                  onTap: () async {
-                    final picked = await showTimePicker(context: context, initialTime: start);
-                    if (picked != null) setState(() => start = picked);
-                  },
-                ),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text('End: ${end.format(context)}'),
-                  trailing: const Icon(Icons.access_time_filled),
-                  onTap: () async {
-                    final picked = await showTimePicker(context: context, initialTime: end);
-                    if (picked != null) setState(() => end = picked);
-                  },
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Cancel'),
-              ),
-              ElevatedButton(
-                onPressed: () async {
-                  if (selectedPatientId == null) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Please select a patient.')),
-                    );
-                    return;
-                  }
-
-                  final patient = ref
-                      .read(patientListProvider)
-                      .firstWhere((p) => p.id == selectedPatientId);
-
-                  final startDt = DateTime(
-                    date.year,
-                    date.month,
-                    date.day,
-                    start.hour,
-                    start.minute,
-                  );
-                  final endDt = DateTime(
-                    date.year,
-                    date.month,
-                    date.day,
-                    end.hour,
-                    end.minute,
-                  );
-
-                  try {
-                    await ref.read(appointmentProvider.notifier).addAppointment(
-                          Appointment(
-                            patientId: patient.id,
-                            patientName: patient.name,
-                            appointmentDate: date,
-                            startTime: startDt,
-                            endTime: endDt,
-                            dentistName: 'Dr. Priya Sharma',
-                            status: AppointmentStatus.scheduled,
-                          ),
-                        );
-                  } catch (_) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Double booking detected for selected time slot.')),
-                    );
-                    return;
-                  }
-
-                  Navigator.of(context).pop();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Appointment added successfully.')),
-                  );
-                },
-                child: const Text('Save'),
-              ),
-            ],
-          );
-        },
-      );
-    },
-  );
 }
 
 Future<void> _showPatientFormDialog(

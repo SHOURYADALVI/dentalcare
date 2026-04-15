@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:fl_chart/fl_chart.dart';
@@ -10,7 +11,7 @@ import '../../../../core/providers/treatment_providers.dart';
 import '../../../../core/providers/auth_providers.dart';
 
 class DashboardPage extends ConsumerWidget {
-  const DashboardPage({Key? key}) : super(key: key);
+  const DashboardPage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -20,8 +21,13 @@ class DashboardPage extends ConsumerWidget {
     final currentUser = ref.watch(currentUserProvider);
     final treatmentsAsync = ref.watch(treatmentsProvider);
 
-    return Scaffold(
-      appBar: AppBar(
+    return WillPopScope(
+      onWillPop: () async {
+        await SystemNavigator.pop();
+        return false;
+      },
+      child: Scaffold(
+        appBar: AppBar(
         title: const Text('Dashboard'),
         elevation: 0,
         actions: [
@@ -40,7 +46,7 @@ class DashboardPage extends ConsumerWidget {
                 child: const Text('Logout'),
                 onTap: () {
                   ref.read(logoutProvider);
-                  context.go('/login');
+                  context.push('/login');
                 },
               ),
             ],
@@ -98,7 +104,7 @@ class DashboardPage extends ConsumerWidget {
                     value: count.toString(),
                     icon: Icons.people,
                     iconColor: AppTheme.accentColor,
-                    onTap: () => context.go('/patients'),
+                    onTap: () => context.push('/patients'),
                   ),
                   loading: () => const InfoCard(
                     title: 'Total Patients',
@@ -121,7 +127,7 @@ class DashboardPage extends ConsumerWidget {
                     value: count.toString(),
                     icon: Icons.calendar_today,
                     iconColor: AppTheme.primaryDark,
-                    onTap: () => context.go('/appointments'),
+                    onTap: () => context.push('/appointments'),
                   ),
                   loading: () => const InfoCard(
                     title: 'Today\'s Appointments',
@@ -144,7 +150,7 @@ class DashboardPage extends ConsumerWidget {
                     value: '\$${(revenue / 1000).toStringAsFixed(1)}K',
                     icon: Icons.trending_up,
                     iconColor: AppTheme.successColor,
-                    onTap: () => context.go('/billing'),
+                    onTap: () => context.push('/billing'),
                   ),
                   loading: () => const InfoCard(
                     title: 'Total Revenue',
@@ -167,7 +173,7 @@ class DashboardPage extends ConsumerWidget {
                     value: treatments.length.toString(),
                     icon: Icons.medical_services,
                     iconColor: AppTheme.primaryColor,
-                    onTap: () => context.go('/treatments'),
+                    onTap: () => context.push('/treatments'),
                   ),
                   loading: () => const InfoCard(
                     title: 'Treatments',
@@ -308,23 +314,24 @@ class DashboardPage extends ConsumerWidget {
                 _QuickActionButton(
                   icon: Icons.calendar_today,
                   label: 'Book Appointment',
-                  onTap: () => context.go('/appointments'),
+                  onTap: () => context.push('/appointments'),
                 ),
                 _QuickActionButton(
                   icon: Icons.medical_services,
                   label: 'Record Treatment',
-                  onTap: () => context.go('/treatments'),
+                  onTap: () => context.push('/treatments'),
                 ),
                 _QuickActionButton(
                   icon: Icons.receipt,
                   label: 'View Billing',
-                  onTap: () => context.go('/billing'),
+                  onTap: () => context.push('/billing'),
                 ),
               ],
             ),
             const SizedBox(height: AppTheme.paddingMedium),
           ],
         ),
+      ),
       ),
     );
   }

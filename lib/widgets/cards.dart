@@ -200,7 +200,6 @@ class StatusBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     Color bgColor = backgroundColor ?? AppTheme.primaryColor;
-    Color txtColor = textColor ?? Colors.white;
 
     // Customize colors based on status
     if (status.toLowerCase().contains('scheduled') ||
@@ -214,6 +213,8 @@ class StatusBadge extends StatelessWidget {
     } else if (status.toLowerCase().contains('pending')) {
       bgColor = AppTheme.warningColor;
     }
+
+    final effectiveTextColor = textColor ?? bgColor;
 
     return Container(
       padding: const EdgeInsets.symmetric(
@@ -230,7 +231,7 @@ class StatusBadge extends StatelessWidget {
         style: TextStyle(
           fontSize: 12,
           fontWeight: FontWeight.w500,
-          color: bgColor,
+          color: effectiveTextColor,
         ),
       ),
     );

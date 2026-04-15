@@ -32,7 +32,6 @@ class _AddEditPatientPageState extends ConsumerState<AddEditPatientPage> {
 
   String? _selectedGender = 'Male';
   bool _isLoading = false;
-  bool _isInit = false;
 
   @override
   void initState() {
@@ -61,7 +60,6 @@ class _AddEditPatientPageState extends ConsumerState<AddEditPatientPage> {
       _emergencyContactController.text = patient.emergencyContact ?? '';
       setState(() {
         _selectedGender = patientGender;
-        _isInit = true;
       });
     }
   }

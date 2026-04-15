@@ -70,12 +70,12 @@ final loginProvider = FutureProvider.family<bool, (String, String)>((ref, creden
   
   // If not a hardcoded user, check if they're a patient with a valid email
   final normalizedEmail = email.trim().toLowerCase();
-  final matchingPatient = patients.firstWhere(
+  final matchingPatients = patients.where(
     (p) => p.email != null && p.email!.toLowerCase() == normalizedEmail,
-    orElse: () => null as dynamic,
   );
   
-  if (matchingPatient != null) {
+  if (matchingPatients.isNotEmpty) {
+    final matchingPatient = matchingPatients.first;
     // Create a User object for this patient
     final patientUser = User(
       id: matchingPatient.id,

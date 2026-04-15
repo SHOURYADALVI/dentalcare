@@ -12,9 +12,44 @@ import '../../services/local_store/local_store.dart';
 const _doctorStorageKey = 'dentlink_doctor_profile';
 const _patientsStorageKey = 'dentlink_patient_list';
 const _appointmentsStorageKey = 'dentlink_appointments';
+const _availabilityStorageKey = 'dentlink_availability';
 const _reportsStorageKey = 'dentlink_reports';
 const _paymentsStorageKey = 'dentlink_payments';
 final _store = createLocalStore();
+
+class ClinicAvailability {
+  final int startHour;
+  final int endHour;
+
+  const ClinicAvailability({
+    required this.startHour,
+    required this.endHour,
+  });
+
+  ClinicAvailability copyWith({
+    int? startHour,
+    int? endHour,
+  }) {
+    return ClinicAvailability(
+      startHour: startHour ?? this.startHour,
+      endHour: endHour ?? this.endHour,
+    );
+  }
+
+  factory ClinicAvailability.fromJson(Map<String, dynamic> json) {
+    return ClinicAvailability(
+      startHour: (json['startHour'] ?? 9) as int,
+      endHour: (json['endHour'] ?? 17) as int,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'startHour': startHour,
+      'endHour': endHour,
+    };
+  }
+}
 
 class DoctorNotifier extends StateNotifier<DoctorProfile> {
   DoctorNotifier()
@@ -141,6 +176,8 @@ class PatientListNotifier extends StateNotifier<List<Patient>> {
 }
 
 class AppointmentNotifier extends StateNotifier<List<Appointment>> {
+  ClinicAvailability _availability = const ClinicAvailability(startHour: 9, endHour: 17);
+
   AppointmentNotifier()
       : super([
           Appointment(
@@ -149,9 +186,10 @@ class AppointmentNotifier extends StateNotifier<List<Appointment>> {
             patientName: 'Aarya Patil',
             appointmentDate: DateTime.now(),
             startTime: DateTime.now().copyWith(hour: 10, minute: 0),
-            endTime: DateTime.now().copyWith(hour: 10, minute: 45),
+            endTime: DateTime.now().copyWith(hour: 11, minute: 0),
             dentistName: 'Dr. Priya Sharma',
             status: AppointmentStatus.scheduled,
+            reasonForVisit: 'Tooth pain',
           ),
           Appointment(
             id: 'apt-002',
@@ -159,15 +197,25 @@ class AppointmentNotifier extends StateNotifier<List<Appointment>> {
             patientName: 'Rohit Singh',
             appointmentDate: DateTime.now(),
             startTime: DateTime.now().copyWith(hour: 11, minute: 30),
-            endTime: DateTime.now().copyWith(hour: 12, minute: 15),
+            endTime: DateTime.now().copyWith(hour: 12, minute: 30),
             dentistName: 'Dr. Priya Sharma',
             status: AppointmentStatus.completed,
+            reasonForVisit: 'Root canal follow-up',
           ),
         ]) {
     _load();
   }
 
+  ClinicAvailability get availability => _availability;
+
   Future<void> _load() async {
+    final availabilityRaw = await _store.getString(_availabilityStorageKey);
+    if (availabilityRaw != null && availabilityRaw.isNotEmpty) {
+      _availability = ClinicAvailability.fromJson(
+        jsonDecode(availabilityRaw) as Map<String, dynamic>,
+      );
+    }
+
     final raw = await _store.getString(_appointmentsStorageKey);
     if (raw == null || raw.isEmpty) return;
 
@@ -176,6 +224,10 @@ class AppointmentNotifier extends StateNotifier<List<Appointment>> {
         .map((item) => Appointment.fromJson(item as Map<String, dynamic>))
         .toList();
     await purgeExpiredCompletedAppointments();
+  }
+
+  Future<void> _persistAvailability() async {
+    await _store.setString(_availabilityStorageKey, jsonEncode(_availability.toJson()));
   }
 
   Future<void> _persist() async {
@@ -187,6 +239,7 @@ class AppointmentNotifier extends StateNotifier<List<Appointment>> {
     for (final apt in state) {
       if (apt.id == target.id) continue;
       if (apt.status == AppointmentStatus.cancelled) continue;
+      if (apt.status == AppointmentStatus.requested) continue;
       if (apt.appointmentDate.year != target.appointmentDate.year ||
           apt.appointmentDate.month != target.appointmentDate.month ||
           apt.appointmentDate.day != target.appointmentDate.day) {
@@ -198,6 +251,168 @@ class AppointmentNotifier extends StateNotifier<List<Appointment>> {
       if (overlap) return true;
     }
     return false;
+  }
+
+  DateTime _atHour(DateTime date, int hour) {
+    return DateTime(date.year, date.month, date.day, hour);
+  }
+
+  DateTime _normalizeDate(DateTime date) {
+    return DateTime(date.year, date.month, date.day);
+  }
+
+  bool _isSameDay(DateTime a, DateTime b) {
+    return a.year == b.year && a.month == b.month && a.day == b.day;
+  }
+
+  List<DateTime> buildHourlySlotsForDate(DateTime date) {
+    final normalized = _normalizeDate(date);
+    final slots = <DateTime>[];
+    for (var hour = _availability.startHour; hour < _availability.endHour; hour++) {
+      slots.add(_atHour(normalized, hour));
+    }
+    return slots;
+  }
+
+  bool isSlotBooked(DateTime slotStart) {
+    final slotEnd = slotStart.add(const Duration(hours: 1));
+    return state.any((apt) {
+      if (apt.status != AppointmentStatus.scheduled && apt.status != AppointmentStatus.completed) {
+        return false;
+      }
+      if (!_isSameDay(apt.appointmentDate, slotStart)) return false;
+      return !(slotEnd.isBefore(apt.startTime) || slotStart.isAfter(apt.endTime));
+    });
+  }
+
+  bool isSlotPending(DateTime slotStart) {
+    final slotEnd = slotStart.add(const Duration(hours: 1));
+    return state.any((apt) {
+      if (apt.status != AppointmentStatus.requested) return false;
+      if (!_isSameDay(apt.appointmentDate, slotStart)) return false;
+
+      final prefStart = apt.preferredStartTime;
+      final prefEnd = apt.preferredEndTime;
+
+      if (prefStart == null || prefEnd == null) {
+        return apt.startTime.hour == slotStart.hour;
+      }
+
+      return !(slotEnd.isBefore(prefStart) || slotStart.isAfter(prefEnd));
+    });
+  }
+
+  List<DateTime> getAvailableSlotsForDate(DateTime date) {
+    final slots = buildHourlySlotsForDate(date);
+    return slots.where((slot) => !isSlotBooked(slot)).toList();
+  }
+
+  List<Appointment> getPendingRequests() {
+    final pending = state.where((apt) => apt.status == AppointmentStatus.requested).toList();
+    pending.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    return pending;
+  }
+
+  Future<void> updateWorkingHours({
+    required int startHour,
+    required int endHour,
+  }) async {
+    if (startHour < 0 || endHour > 24 || endHour <= startHour) {
+      throw Exception('Invalid working hours');
+    }
+
+    _availability = ClinicAvailability(startHour: startHour, endHour: endHour);
+    await _persistAvailability();
+  }
+
+  Future<void> requestAppointment({
+    required String patientId,
+    required String patientName,
+    required DateTime preferredDate,
+    DateTime? preferredStartTime,
+    DateTime? preferredEndTime,
+    required String reasonForVisit,
+  }) async {
+    await purgeExpiredCompletedAppointments();
+
+    final baseStart = preferredStartTime ?? _atHour(preferredDate, _availability.startHour);
+    final baseEnd = preferredEndTime ?? baseStart.add(const Duration(hours: 1));
+    final normalizedDate = _normalizeDate(preferredDate);
+
+    final duplicateIndex = state.indexWhere(
+      (apt) =>
+          apt.patientId == patientId &&
+          apt.status == AppointmentStatus.requested &&
+          apt.appointmentDate.year == normalizedDate.year &&
+          apt.appointmentDate.month == normalizedDate.month &&
+          apt.appointmentDate.day == normalizedDate.day &&
+          apt.startTime == baseStart &&
+          apt.endTime == baseEnd &&
+          apt.reasonForVisit == reasonForVisit,
+    );
+
+    if (duplicateIndex != -1) {
+      return;
+    }
+
+    final request = Appointment(
+      patientId: patientId,
+      patientName: patientName,
+      appointmentDate: normalizedDate,
+      startTime: baseStart,
+      endTime: baseEnd,
+      preferredStartTime: preferredStartTime,
+      preferredEndTime: preferredEndTime,
+      reasonForVisit: reasonForVisit,
+      dentistName: 'Dr. Priya Sharma',
+      status: AppointmentStatus.requested,
+    );
+
+    state = [...state, request];
+    await _persist();
+  }
+
+  Future<void> approveRequest({
+    required String requestId,
+    required DateTime slotStart,
+    required String dentistName,
+  }) async {
+    final request = state.firstWhere((a) => a.id == requestId);
+    final approved = request.copyWith(
+      appointmentDate: _normalizeDate(slotStart),
+      startTime: slotStart,
+      endTime: slotStart.add(const Duration(hours: 1)),
+      status: AppointmentStatus.scheduled,
+      dentistName: dentistName,
+      rejectionReason: null,
+    );
+
+    if (_hasConflict(approved)) {
+      throw Exception('Selected slot is already booked');
+    }
+
+    state = [
+      for (final apt in state)
+        if (apt.id == requestId) approved else apt,
+    ];
+    await _persist();
+  }
+
+  Future<void> rejectRequest({
+    required String requestId,
+    String? reason,
+  }) async {
+    state = [
+      for (final apt in state)
+        if (apt.id == requestId)
+          apt.copyWith(
+            status: AppointmentStatus.cancelled,
+            rejectionReason: reason,
+          )
+        else
+          apt,
+    ];
+    await _persist();
   }
 
   bool _isExpiredCompletedAppointment(Appointment appointment, DateTime now) {
@@ -369,6 +584,16 @@ final patientListProvider = StateNotifierProvider<PatientListNotifier, List<Pati
 
 final appointmentProvider = StateNotifierProvider<AppointmentNotifier, List<Appointment>>((ref) {
   return AppointmentNotifier();
+});
+
+final clinicAvailabilityProvider = Provider<ClinicAvailability>((ref) {
+  ref.watch(appointmentProvider);
+  return ref.read(appointmentProvider.notifier).availability;
+});
+
+final appointmentRequestsProvider = Provider<List<Appointment>>((ref) {
+  ref.watch(appointmentProvider);
+  return ref.read(appointmentProvider.notifier).getPendingRequests();
 });
 
 final reportProvider = StateNotifierProvider<ReportNotifier, List<DoctorReport>>((ref) {

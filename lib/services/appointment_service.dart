@@ -88,7 +88,6 @@ class AppointmentService {
   /// Get available time slots for a date
   Future<List<DateTime>> getAvailableSlots(DateTime date) async {
     await Future.delayed(const Duration(milliseconds: 300));
-    const workingHours = 8; // 9 AM to 5 PM
     const slotDuration = 60; // 1 hour slots
     final slots = <DateTime>[];
 
